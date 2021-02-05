@@ -1,0 +1,89 @@
+---
+      #########################################################################
+      # Install Prometheus server for Monitoring                              #
+      # Installs based on arch and OS                                         #
+      # https://github.com/KevinBonilla/prometheus-installer                  #
+      #########################################################################
+
+tasks:
+hosts: all
+connection: local
+  - name: Check if prometheus is installed
+    stat:
+      path: /usr/local/bin/prometheus
+    register: prometheus_check
+
+  - name : Install prometheus for Ubuntu 20.04 if binary does not exist
+    block:
+    - name: Set fact for environment variables
+      set_fact:
+        prometheus_release: "2.24.1"
+
+    - name: Add user and group prometheus
+      user:
+        name: prometheus
+        shell: /bin/False
+        groups: prometheus
+
+    - name: Make directories
+      file:
+        path: "{{item}}"
+        state: directory
+        recurse: yes
+        owner: prometheus
+        group: prometheus
+      with_items: ["/etc/prometheus", "/var/lib/prometheus"]
+
+    - name: Download and unarchive prometheus file
+      unarchive:
+        src: https://github.com/prometheus/prometheus/releases/download/v{{prometheus_release}}/prometheus-{{prometheus_release}}.linux-amd64.tar.gz
+        dest: /tmp/
+        remote_src: yes
+
+    - name: Copy prometheus and promtool
+      copy:
+        src: /tmp/prometheus-{{prometheus_release}}.linux-amd64/{{item}}
+        dest: /usr/local/bin
+        owner: prometheus
+        group: prometheus
+      with_items:
+        - prometheus
+        - promtool
+
+    - name: Copy consoles and consoles_libraries directory
+      copy:
+        src: /tmp/prometheus-{{prometheus_release}}.linux-amd64/{{item}}
+        dest: /etc/prometheus
+        owner: prometheus
+        group: prometheus
+      with_items:
+        - consoles
+        - console_libraries
+
+    - name: Copy prometheus.yml to /etc/prometheus
+      copy:
+        src: /tmp/prometheus-{{prometheus_release}}.linux-amd64/prometheus.yml
+        dest: /etc/prometheus
+        owner: prometheus
+        group: prometheus
+
+    - name: Run ufw for firewall exception
+      command: ufw allow 9090/tcp
+
+    - name: Copy service file to /etc/systemd/system/
+      copy:
+        src: /tmp/prometheus.service
+        dest: /etc/systemd/system/prometheus.service
+
+    - name: Enable prometheus service and reload
+      systemd:
+        name: prometheus
+        enabled: yes
+        daemon_reload: yes
+    when: 
+      - ansible_facts['distribution'] == "Ubuntu" and ansible_facts['distribution_major_version'] == "20.04"
+      - prometheus_check.stat.exists == False
+    tags: prometheus
+    become_user: root
+    ignore_errors: yes
+
